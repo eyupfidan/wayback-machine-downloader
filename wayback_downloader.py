@@ -87,6 +87,12 @@ Examples:
     p.add_argument("--out", default="./site", help="Output directory (default: ./site)")
     p.add_argument("--workers", type=int, default=8, help="Number of concurrent downloads (default: 8)")
     p.add_argument("--max-pages", type=int, default=200, help="Maximum number of pages to download (default: 200)")
+    p.add_argument(
+        "--max-per-template",
+        type=int,
+        default=1,
+        help="Maximum pages for repeatable blog/category/tag routes; 0 disables grouping (default: 1)",
+    )
     p.add_argument("--from", dest="from_ts", help="Start date (YYYYMMDD)")
     p.add_argument("--to", dest="to_ts", help="End date (YYYYMMDD)")
     p.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
@@ -143,8 +149,14 @@ class Pipeline:
                 [self.origin_url],
                 fetcher=fetcher,
                 max_pages=self.args.max_pages,
+                max_per_template=self.args.max_per_template,
+                capture_dir=self.output_dir,
             )
             self.pages = bfs_result.pages
+            # Treat captured pages like any other localized URL so navigation
+            # between saved pages is rewritten to relative offline paths.
+            for page in self.pages:
+                self.asset_map[page.url] = page.local_path
             logging.info("BFS complete: %d pages found, %d skipped",
                          len(self.pages), len(bfs_result.skipped))
 
@@ -153,8 +165,8 @@ class Pipeline:
                 return
 
             # 2) Download pages and discover assets (pass 1)
-            logging.info("=== Stage 2: Download pages and discover assets ===")
-            await self._discover_assets_for_pages(fetcher)
+            logging.info("=== Stage 2: Discover assets from captured pages ===")
+            await self._discover_assets_for_pages()
 
             # 3) Download assets (recursive CSS, best-effort JS, images, and fonts)
             logging.info("=== Stage 3: Download %d assets ===", len(self.asset_queue))
@@ -162,7 +174,7 @@ class Pipeline:
 
             # 4) Rewrite and save HTML now that asset_map is complete
             logging.info("=== Stage 4: Rewrite HTML and write it to disk ===")
-            await self._rewrite_and_save_pages(fetcher)
+            await self._rewrite_and_save_pages()
 
             # 5) Generate the sitemap
             logging.info("=== Stage 5: Write sitemap ===")
@@ -174,27 +186,14 @@ class Pipeline:
 
             logging.info("Done. Output: %s", self.output_dir)
 
-    async def _discover_assets_for_pages(self, fetcher: WaybackFetcher) -> None:
-        """Download each page and add its asset URLs to asset_queue.
-
-        BFS already downloaded the pages, but their bodies are not retained.
-        Fetch each snapshot from CDX again and parse it. This costs one extra
-        HTTP request but allows HTML rewriting after the first discovery pass.
-        """
+    async def _discover_assets_for_pages(self) -> None:
+        """Discover assets from the HTML retained during BFS."""
         for i, page in enumerate(self.pages):
             logging.info("[%d/%d] Discovering assets: %s", i + 1, len(self.pages), page.url)
             try:
-                result = await fetcher.fetch_snapshot(
-                    page.url,
-                    timestamps=[page.timestamp],
-                    allow_fallback=False,
-                )
-                if result.status != 200 or not result.body:
+                if not page.html_text:
                     continue
-                html_text = result.body.decode("utf-8", errors="replace")
-
-                # Collect asset URLs.
-                soup = BeautifulSoup(html_text, "lxml")
+                soup = BeautifulSoup(page.html_text, "lxml")
                 _enqueue_assets_from_soup(soup, self.asset_queue, self.asset_map, page.url)
 
             except Exception as e:
@@ -313,30 +312,21 @@ class Pipeline:
         for u in urls:
             self.asset_queue.append(u)
 
-    async def _rewrite_and_save_pages(self, fetcher: WaybackFetcher) -> None:
-        """Download pages, rewrite their HTML, and write them to disk."""
+    async def _rewrite_and_save_pages(self) -> None:
+        """Rewrite and save the HTML retained during BFS."""
         for i, page in enumerate(self.pages):
             logging.info("[%d/%d] Rewriting and saving HTML: %s → %s",
                          i + 1, len(self.pages), page.url, page.local_path)
 
             try:
-                result = await fetcher.fetch_snapshot(
-                    page.url,
-                    timestamps=[page.timestamp],
-                    allow_fallback=False,
-                )
-                if result.status != 200 or not result.body:
-                    page.error = f"status {result.status}"
+                if not page.html_text:
+                    page.error = "HTML was not retained during discovery"
                     continue
 
-                html_text = result.body.decode("utf-8", errors="replace")
-                soup = BeautifulSoup(html_text, "lxml")
+                soup = BeautifulSoup(page.html_text, "lxml")
 
                 # Remove the Wayback toolbar.
                 clean_toolbar(soup)
-
-                # Run a second asset-discovery pass while rewriting HTML.
-                _enqueue_assets_from_soup(soup, self.asset_queue, self.asset_map, page.url)
 
                 # Rewrite HTML using the page path relative to output.
                 stats = rewrite_html(

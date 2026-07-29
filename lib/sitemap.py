@@ -12,13 +12,12 @@ The main pipeline uses `discover_pages` to:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from collections import deque
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -41,6 +40,23 @@ class PageInfo:
     internal_links: int = 0
     status: int = 200
     error: Optional[str] = None
+    # The discovery request already downloaded the page. Keep it in memory so
+    # the pipeline can discover assets and write the page without two more
+    # Wayback requests. This field is intentionally omitted from sitemap.json.
+    html_text: str = field(
+        default="",
+        repr=False,
+        compare=False,
+        metadata={"sitemap": False},
+    )
+
+
+@dataclass
+class SkippedPage:
+    """A URL omitted during discovery and the reason it was omitted."""
+
+    url: str
+    reason: str
 
 
 def normalize_url(url: str) -> str:
@@ -102,8 +118,48 @@ class BFSResult:
     """Result of BFS discovery."""
 
     pages: list[PageInfo] = field(default_factory=list)
-    skipped: list[str] = field(default_factory=list)
+    skipped: list[SkippedPage] = field(default_factory=list)
     origin_host: str = ""
+
+
+# Only routes that strongly imply repeatable content are grouped. Ordinary
+# pages such as /about and /contact keep their own template keys.
+_DETAIL_ROUTE_SEGMENTS = {
+    "blog", "blogs", "post", "posts", "article", "articles",
+    "news", "haber", "haberler", "yazi", "yazilar",
+}
+_TAXONOMY_ROUTE_SEGMENTS = {
+    "category", "categories", "kategori", "kategoriler", "tag", "tags",
+    "etiket", "etiketler",
+}
+
+
+def content_template_key(url: str) -> str | None:
+    """Return a grouping key for repeatable content URLs.
+
+    Examples:
+        /blog/first-post       -> /blog/:detail
+        /category/python       -> /category/:taxonomy
+        /blog/category/python  -> /blog/category/:taxonomy
+
+    A normal route such as /about returns None and is never grouped.
+    """
+    parsed = urlparse(url)
+    segments = [s for s in parsed.path.split("/") if s]
+    lowered = [s.lower() for s in segments]
+
+    # A taxonomy marker is more specific than a preceding blog marker.
+    for index in range(len(lowered) - 1, -1, -1):
+        if lowered[index] in _TAXONOMY_ROUTE_SEGMENTS and index + 1 < len(segments):
+            prefix = lowered[:index + 1]
+            return f"{parsed.netloc.lower()}/{'/'.join(prefix)}/:taxonomy"
+
+    for index, segment in enumerate(lowered):
+        if segment in _DETAIL_ROUTE_SEGMENTS and index + 1 < len(segments):
+            prefix = lowered[:index + 1]
+            return f"{parsed.netloc.lower()}/{'/'.join(prefix)}/:detail"
+
+    return None
 
 
 async def discover_pages_bfs(
@@ -111,6 +167,8 @@ async def discover_pages_bfs(
     *,
     fetcher: WaybackFetcher,
     max_pages: int = 200,
+    max_per_template: int = 1,
+    capture_dir: Path | None = None,
 ) -> BFSResult:
     """Discover pages on the origin host using BFS.
 
@@ -118,6 +176,10 @@ async def discover_pages_bfs(
         start_urls: Root URLs, usually a single URL.
         fetcher: Active fetcher.
         max_pages: Maximum number of pages.
+        max_per_template: Maximum pages for known repeatable URL templates.
+            Set to 0 to disable template grouping.
+        capture_dir: When provided, save each page as soon as it is discovered.
+            The pipeline later overwrites it with locally rewritten HTML.
 
     Returns:
         BFSResult containing pages, skipped URLs, and the origin host.
@@ -125,7 +187,9 @@ async def discover_pages_bfs(
     visited: set[str] = set()
     queue: deque[str] = deque()
     pages: list[PageInfo] = []
-    skipped: list[str] = []
+    skipped: list[SkippedPage] = []
+    skipped_urls: set[str] = set()
+    template_counts: dict[str, int] = {}
 
     # Derive the origin host from the first URL.
     if not start_urls:
@@ -140,6 +204,19 @@ async def discover_pages_bfs(
 
     while queue and len(pages) < max_pages:
         url = queue.popleft()
+        current_template_key = content_template_key(url)
+        if (
+            max_per_template > 0
+            and current_template_key
+            and template_counts.get(current_template_key, 0) >= max_per_template
+        ):
+            if url not in skipped_urls:
+                skipped_urls.add(url)
+                skipped.append(SkippedPage(
+                    url, f"template limit reached ({current_template_key})"
+                ))
+            continue
+
         log.info("BFS: %s (%d/%d)", url, len(pages) + 1, max_pages)
 
         # Retrieve snapshot timestamps from CDX.
@@ -147,11 +224,11 @@ async def discover_pages_bfs(
             snaps = await fetch_snapshots(url, session=fetcher._session)
         except Exception as e:
             log.warning("CDX error for %s: %s", url, e)
-            skipped.append(url)
+            skipped.append(SkippedPage(url, f"CDX error: {e}"))
             continue
 
         if not snaps:
-            skipped.append(url)
+            skipped.append(SkippedPage(url, "no archived snapshot"))
             continue
 
         # Prefer the latest snapshot.
@@ -160,29 +237,63 @@ async def discover_pages_bfs(
         if result.status != 200 or not result.body:
             log.warning("Could not download page: %s (status=%d, err=%s)",
                         url, result.status, result.error)
-            skipped.append(url)
+            skipped.append(SkippedPage(
+                url, f"download failed (status={result.status}, error={result.error})"
+            ))
             continue
 
         try:
             html_text = result.body.decode("utf-8", errors="replace")
         except Exception:
-            skipped.append(url)
+            skipped.append(SkippedPage(url, "HTML decode failed"))
             continue
 
         # Local path
         from .path_mapper import url_to_local_path
         local = url_to_local_path(original, Path("."))
         local_rel = str(local).replace("\\", "/")
+        if capture_dir is not None:
+            capture_path = capture_dir / local_rel
+            try:
+                capture_path.parent.mkdir(parents=True, exist_ok=True)
+                capture_path.write_text(html_text, encoding="utf-8")
+            except OSError as e:
+                log.warning("Could not save captured page %s: %s", capture_path, e)
+
+        # Count only successfully captured pages. If the first candidate for a
+        # template fails, a later candidate can still become its representative.
+        if current_template_key:
+            template_counts[current_template_key] = (
+                template_counts.get(current_template_key, 0) + 1
+            )
 
         # Extract internal links.
         new_links = extract_internal_links(html_text, original, origin_host)
         for link in new_links:
-            if link not in visited:
+            if link in visited:
+                continue
+
+            template_key = content_template_key(link)
+            if (
+                max_per_template > 0
+                and template_key
+                and template_counts.get(template_key, 0) >= max_per_template
+            ):
                 visited.add(link)
-                queue.append(link)
-            if len(visited) >= max_pages * 3:  # May be visitable, but capped.
-                # Do not add more items to the queue.
-                pass
+                if link not in skipped_urls:
+                    skipped_urls.add(link)
+                    skipped.append(SkippedPage(
+                        link, f"template limit reached ({template_key})"
+                    ))
+                continue
+
+            # Avoid allowing a very link-heavy page to grow the queue without
+            # bound while still permitting failed URLs within max_pages.
+            if len(visited) >= max_pages * 3:
+                continue
+
+            visited.add(link)
+            queue.append(link)
 
         pages.append(PageInfo(
             url=original,
@@ -190,6 +301,7 @@ async def discover_pages_bfs(
             local_path=local_rel,
             internal_links=len(new_links),
             status=result.status,
+            html_text=html_text,
         ))
 
     return BFSResult(pages=pages, skipped=skipped, origin_host=origin_host)
@@ -197,7 +309,7 @@ async def discover_pages_bfs(
 
 def write_sitemap(
     pages: list[PageInfo],
-    skipped: list[str],
+    skipped: list[SkippedPage],
     output_dir: Path,
 ) -> None:
     """Write sitemap.json and sitemap.txt."""
@@ -206,8 +318,15 @@ def write_sitemap(
             "pages_downloaded": len(pages),
             "pages_skipped": len(skipped),
         },
-        "pages": [asdict(p) for p in pages],
-        "skipped": [{"url": u, "reason": "download failed"} for u in skipped],
+        "pages": [
+            {
+                item.name: getattr(page, item.name)
+                for item in fields(page)
+                if item.metadata.get("sitemap", True)
+            }
+            for page in pages
+        ],
+        "skipped": [asdict(item) for item in skipped],
     }
 
     json_path = output_dir / "sitemap.json"

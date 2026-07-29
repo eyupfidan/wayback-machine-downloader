@@ -13,13 +13,62 @@ pip install -r requirements.txt
 
 The project has three dependencies: `aiohttp` for concurrent HTTP requests and `beautifulsoup4` with `lxml` for HTML parsing.
 
+## Docker
+
+Build the image:
+
+```bash
+docker build -t wayback-tool .
+```
+
+Run it on Linux/macOS and save the result under the local `site/` directory:
+
+```bash
+mkdir -p site
+docker run --rm \
+    -v "$(pwd)/site:/output" \
+    wayback-tool \
+    --url "https://example.com" \
+    --out /output \
+    --workers 4 \
+    --max-pages 200
+```
+
+PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force site | Out-Null
+docker run --rm `
+    -v "${PWD}/site:/output" `
+    wayback-tool `
+    --url "https://example.com" `
+    --out /output `
+    --workers 4 `
+    --max-pages 200
+```
+
+Docker Compose builds the same image and mounts `./site` automatically:
+
+```bash
+docker compose build
+docker compose run --rm wayback \
+    --url "https://example.com" \
+    --out /output \
+    --workers 4 \
+    --max-pages 200
+```
+
+The container runs as a non-root user. On Linux systems whose local user is not
+UID/GID `1000`, add `--user "$(id -u):$(id -g)"` to `docker run`, or run Compose
+with `docker compose run --rm --user "$(id -u):$(id -g)" wayback ...`.
+
 ## Usage
 
 ```bash
 python wayback_downloader.py --url "https://example.com/"
 ```
 
-This command downloads the latest Wayback snapshot of `example.com` into the `site/` directory. BFS discovery also downloads every discovered page on the same origin, up to the default `--max-pages 200` limit.
+This command downloads the latest Wayback snapshot of `example.com` into the `site/` directory. BFS discovery downloads pages on the same origin up to `--max-pages 200`; repeatable blog/category/tag route templates keep one representative page by default.
 
 ### Options
 
@@ -29,6 +78,7 @@ This command downloads the latest Wayback snapshot of `example.com` into the `si
 | `--out` | `./site` | Output directory |
 | `--workers` | `8` | Number of concurrent downloads. A value between 4 and 16 is recommended to avoid Wayback rate limits |
 | `--max-pages` | `200` | Maximum number of pages to download during BFS discovery |
+| `--max-per-template` | `1` | Maximum pages kept for repeatable blog, post, category, and tag URL patterns. Use `0` to download all matching pages |
 | `--from` | none | Start date in `YYYYMMDD` format, for example `20200101` |
 | `--to` | none | End date in `YYYYMMDD` format |
 | `--verbose`, `-v` | false | Enable debug logging |
@@ -48,6 +98,12 @@ python wayback_downloader.py --url "https://example.com" --workers 16
 
 # Multi-page site
 python wayback_downloader.py --url "https://docs.python.org" --max-pages 500
+
+# Keep up to three examples of each repeatable content template
+python wayback_downloader.py --url "https://example.com" --max-per-template 3
+
+# Disable template grouping and download every discovered page
+python wayback_downloader.py --url "https://example.com" --max-per-template 0
 ```
 
 ## Output structure
@@ -78,7 +134,7 @@ Open `site/example.com/index.html` in a browser. It works offline.
 ## How it works
 
 1. **CDX query** — Retrieves every snapshot timestamp for the requested URL from the Wayback CDX API.
-2. **BFS discovery** — Downloads the first page, scans its `<a href>` links, and queues links on the same origin. Discovery stops at the `--max-pages` limit.
+2. **BFS discovery and page capture** — Downloads each page once, immediately saves its HTML, keeps it for the later rewrite stage, scans its `<a href>` links, and queues links on the same origin. Discovery stops at the `--max-pages` limit. Repeatable routes such as `/blog/{slug}`, `/category/{name}`, and `/tag/{name}` are limited by `--max-per-template`.
 3. **Asset discovery** — Scans each page for `<img src>`, `<link href>`, `<script src>`, `<source src>`, `srcset`, and `url()` references in inline `<style>` elements.
 4. **Concurrent downloads** — Uses `aiohttp` with a semaphore. HTTP 429 responses trigger exponential backoff at 2, 4, 8, 16, and 32 seconds. Snapshot 404 responses trigger three timestamp fallback windows: ±12 hours, ±48 hours, and ±168 hours.
 5. **Recursive CSS processing** — Downloads stylesheets, follows their `@import` and `url()` references, and adds newly discovered assets to the queue. It also detects corrupt fonts where Wayback returns an HTML error page and removes the affected `@font-face` rules.

@@ -1,0 +1,9 @@
+services:
+  wayback:
+    build:
+      context: .
+    image: wayback-tool:local
+    volumes:
+      - ./site:/output
+    command:
+      - --help
