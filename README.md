@@ -134,16 +134,16 @@ Open `site/example.com/index.html` in a browser. It works offline.
 ## How it works
 
 1. **CDX query** — Retrieves every snapshot timestamp for the requested URL from the Wayback CDX API.
-2. **BFS discovery and page capture** — Downloads each page once, immediately saves its HTML, keeps it for the later rewrite stage, scans its `<a href>` links, and queues links on the same origin. Discovery stops at the `--max-pages` limit. Repeatable routes such as `/blog/{slug}`, `/category/{name}`, and `/tag/{name}` are limited by `--max-per-template`.
-3. **Asset discovery** — Scans each page for `<img src>`, `<link href>`, `<script src>`, `<source src>`, `srcset`, and `url()` references in inline `<style>` elements.
-4. **Concurrent downloads** — Uses `aiohttp` with a semaphore. HTTP 429 responses trigger exponential backoff at 2, 4, 8, 16, and 32 seconds. Snapshot 404 responses trigger three timestamp fallback windows: ±12 hours, ±48 hours, and ±168 hours.
-5. **Recursive CSS processing** — Downloads stylesheets, follows their `@import` and `url()` references, and adds newly discovered assets to the queue. It also detects corrupt fonts where Wayback returns an HTML error page and removes the affected `@font-face` rules.
-6. **HTML rewriting** — Uses BeautifulSoup to process every `<a href>`, `<link href>`, `<script src>`, `<img src>`, `<source src>`, `<iframe src>`, and `srcset` attribute:
+2. **Per-page capture** — For each BFS result, downloads the HTML once, immediately scans `<img>`, `<link>`, `<script>`, `<source>`, `srcset`, and inline styles, then downloads that page's complete asset tree before moving to the next page.
+3. **Recursive asset processing** — Downloads CSS, JavaScript, images, and fonts. Relative CSS `@import` and `url()` references are resolved against the stylesheet URL; best-effort JavaScript references such as `fetch()` are resolved against the script URL. Shared assets are downloaded only once across the site.
+4. **Concurrent-safe downloads** — Uses `aiohttp` with rate limiting. HTTP 429 responses trigger exponential backoff at 2, 4, 8, 16, and 32 seconds. Snapshot 404 responses trigger three timestamp fallback windows: ±12 hours, ±48 hours, and ±168 hours.
+5. **HTML rewriting** — Uses BeautifulSoup to process every `<a href>`, `<link href>`, `<script src>`, `<img src>`, `<source src>`, `<iframe src>`, and `srcset` attribute:
    - Removes the Wayback prefix (`/web/{ts}id_/`) from URLs.
    - Converts URLs found in `asset_map` to relative local paths.
    - Queues internal URLs that have not been downloaded yet and leaves placeholders for a later pass.
    - Keeps external URLs unchanged; they will not work offline.
-7. **Wayback toolbar cleanup** — Removes `#wm-ipp-base`, `wombat.js`, `bundle-playback.js`, `banner-styles.css`, RufflePlayer scripts, and toolbar iframes.
+6. **Wayback toolbar cleanup** — Removes `#wm-ipp-base`, `wombat.js`, `bundle-playback.js`, `banner-styles.css`, RufflePlayer scripts, and toolbar iframes.
+7. **Final local link pass** — After discovery, rewrites links to pages found later. This pass uses retained HTML and performs no network or asset downloads.
 8. **Sitemap generation** — Writes `sitemap.json` with page metadata and `sitemap.txt` with a list of paths.
 
 ## Limitations

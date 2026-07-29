@@ -171,8 +171,14 @@ class WaybackFetcher:
             FetchResult; a status of 200 indicates success.
         """
         if not timestamps:
-            snaps = await fetch_snapshots(original_url, session=self._session)
-            timestamps = [ts for ts, _u in snaps]
+            snaps = await fetch_snapshots(
+                original_url,
+                html_only=False,
+                session=self._session,
+            )
+            # CDX returns chronological rows. Prefer recent captures and limit
+            # the attempts in fetch_snapshot to the newest five.
+            timestamps = [ts for ts, _u in reversed(snaps)]
 
         # Signatures that distinguish Wayback's "not archived" placeholder
         # HTML, usually a home-page redirect, from real content.

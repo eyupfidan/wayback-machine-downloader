@@ -17,7 +17,7 @@ import logging
 from collections import deque
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -169,6 +169,7 @@ async def discover_pages_bfs(
     max_pages: int = 200,
     max_per_template: int = 1,
     capture_dir: Path | None = None,
+    on_page: Callable[[PageInfo], Awaitable[None]] | None = None,
 ) -> BFSResult:
     """Discover pages on the origin host using BFS.
 
@@ -180,6 +181,8 @@ async def discover_pages_bfs(
             Set to 0 to disable template grouping.
         capture_dir: When provided, save each page as soon as it is discovered.
             The pipeline later overwrites it with locally rewritten HTML.
+        on_page: Optional async hook called after a page is captured and its
+            links are queued, before discovery continues to the next page.
 
     Returns:
         BFSResult containing pages, skipped URLs, and the origin host.
@@ -295,14 +298,21 @@ async def discover_pages_bfs(
             visited.add(link)
             queue.append(link)
 
-        pages.append(PageInfo(
+        page = PageInfo(
             url=original,
             timestamp=ts,
             local_path=local_rel,
             internal_links=len(new_links),
             status=result.status,
             html_text=html_text,
-        ))
+        )
+        pages.append(page)
+        if on_page is not None:
+            try:
+                await on_page(page)
+            except Exception as e:
+                log.warning("Per-page processing failed for %s: %s", page.url, e)
+                page.error = str(e)
 
     return BFSResult(pages=pages, skipped=skipped, origin_host=origin_host)
 

@@ -26,6 +26,7 @@ async def fetch_snapshots(
     to_ts: str | None = None,
     match_type: str = "exact",
     limit: int = 200,
+    html_only: bool = True,
     session: aiohttp.ClientSession | None = None,
 ) -> list[tuple[str, str]]:
     """Fetch a list of Wayback snapshots for a URL.
@@ -38,6 +39,8 @@ async def fetch_snapshots(
         match_type: "exact" (default), "prefix", or "domain". The "domain"
             mode may return HTTP 403 for large sites.
         limit: Maximum number of snapshots.
+        html_only: Restrict results to HTML pages. Disable this for CSS,
+            JavaScript, images, fonts, and other assets.
         session: Reusable aiohttp session.
 
     Returns:
@@ -49,8 +52,10 @@ async def fetch_snapshots(
         "fl": "timestamp,original,statuscode,mimetype",
         "output": "json",
         "limit": str(limit),
-        "filter": ["statuscode:200", "mimetype:text/html"],
+        "filter": ["statuscode:200"],
     }
+    if html_only:
+        params["filter"].append("mimetype:text/html")
     if from_ts:
         params["from"] = from_ts
     if to_ts:
