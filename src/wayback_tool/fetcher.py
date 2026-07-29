@@ -1,4 +1,4 @@
-"""Asynchronous concurrent fetcher for downloading files from Wayback.
+"""Asynchronous fetcher for downloading files from Wayback.
 
 - aiohttp-based rate limiting with a semaphore
 - Exponential backoff for HTTP 429

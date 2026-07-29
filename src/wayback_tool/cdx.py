@@ -1,4 +1,4 @@
-"""Wayback CDX API client.
+"""Wayback CDX API client and snapshot selector.
 
 CDX endpoint:
     https://web.archive.org/cdx/search/cdx

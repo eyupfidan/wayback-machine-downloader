@@ -1,4 +1,4 @@
-"""CSS processor for following @import and url() references.
+"""CSS dependency extraction and URL rewriting.
 
 Find every asset reference in a stylesheet, including images, fonts, and other
 stylesheets, then download and convert them to local paths. Processing has two
@@ -72,6 +72,16 @@ def extract_css_urls(css_text: str) -> list[str]:
             seen.add(u)
             out.append(u)
     return out
+
+
+def extract_css_import_urls(css_text: str) -> set[str]:
+    """Return URLs referenced specifically by CSS @import rules."""
+    imports = set()
+    for match in IMPORT_PATTERN.finditer(css_text):
+        url = match.group("url1") or match.group("url2")
+        if url:
+            imports.add(_clean_css_url(url))
+    return imports
 
 
 def rewrite_css(

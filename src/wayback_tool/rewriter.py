@@ -1,4 +1,4 @@
-"""HTML/CSS/JS rewriter that converts Wayback URLs to local paths.
+"""HTML/CSS/JS rewriting from Wayback URLs to local paths.
 
 The main `rewrite_html` function:
 - Visits every <a>, <link>, <script>, <img>, <source>, <iframe>, and srcset

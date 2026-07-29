@@ -9,11 +9,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY wayback_downloader.py .
-COPY lib ./lib
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir .
 
 # UID/GID 1000 works with the common local Linux user while also avoiding a
 # root process inside Docker Desktop environments.
@@ -24,5 +22,5 @@ RUN groupadd --gid 1000 wayback \
 
 USER wayback
 
-ENTRYPOINT ["python", "/app/wayback_downloader.py"]
+ENTRYPOINT ["wayback-tool"]
 CMD ["--help"]

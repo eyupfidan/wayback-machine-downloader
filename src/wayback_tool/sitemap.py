@@ -1,4 +1,4 @@
-"""BFS discovery and sitemap generation.
+"""Breadth-first page discovery and sitemap generation.
 
 The main pipeline uses `discover_pages` to:
 1. Query the seed URL through CDX
@@ -170,6 +170,7 @@ async def discover_pages_bfs(
     max_per_template: int = 1,
     capture_dir: Path | None = None,
     on_page: Callable[[PageInfo], Awaitable[None]] | None = None,
+    preferred_timestamp: str | None = None,
 ) -> BFSResult:
     """Discover pages on the origin host using BFS.
 
@@ -183,6 +184,8 @@ async def discover_pages_bfs(
             The pipeline later overwrites it with locally rewritten HTML.
         on_page: Optional async hook called after a page is captured and its
             links are queued, before discovery continues to the next page.
+        preferred_timestamp: Timestamp supplied in the original Wayback URL.
+            When set, use it directly instead of querying CDX for every page.
 
     Returns:
         BFSResult containing pages, skipped URLs, and the origin host.
@@ -222,20 +225,22 @@ async def discover_pages_bfs(
 
         log.info("BFS: %s (%d/%d)", url, len(pages) + 1, max_pages)
 
-        # Retrieve snapshot timestamps from CDX.
-        try:
-            snaps = await fetch_snapshots(url, session=fetcher._session)
-        except Exception as e:
-            log.warning("CDX error for %s: %s", url, e)
-            skipped.append(SkippedPage(url, f"CDX error: {e}"))
-            continue
+        if preferred_timestamp:
+            ts, original = preferred_timestamp, url
+        else:
+            try:
+                snaps = await fetch_snapshots(url, session=fetcher._session)
+            except Exception as e:
+                log.warning("CDX error for %s: %s", url, e)
+                skipped.append(SkippedPage(url, f"CDX error: {e}"))
+                continue
 
-        if not snaps:
-            skipped.append(SkippedPage(url, "no archived snapshot"))
-            continue
+            if not snaps:
+                skipped.append(SkippedPage(url, "no archived snapshot"))
+                continue
 
-        # Prefer the latest snapshot.
-        ts, original = snaps[-1]
+            # Prefer the latest snapshot.
+            ts, original = snaps[-1]
         result = await fetcher.fetch_snapshot(original, timestamps=[ts])
         if result.status != 200 or not result.body:
             log.warning("Could not download page: %s (status=%d, err=%s)",

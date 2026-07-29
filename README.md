@@ -7,11 +7,18 @@ When you open `index.html` in a browser, the copy looks **identical to the origi
 ## Installation
 
 ```bash
-# Requires Python 3.8+
-pip install -r requirements.txt
+# Requires Python 3.10+
+pip install .
 ```
 
-The project has three dependencies: `aiohttp` for concurrent HTTP requests and `beautifulsoup4` with `lxml` for HTML parsing.
+For an editable development install with tests:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+The project has three runtime dependencies: `aiohttp` for concurrent HTTP requests and `beautifulsoup4` with `lxml` for HTML parsing.
 
 ## Docker
 
@@ -65,7 +72,7 @@ with `docker compose run --rm --user "$(id -u):$(id -g)" wayback ...`.
 ## Usage
 
 ```bash
-python wayback_downloader.py --url "https://example.com/"
+python -m wayback_tool --url "https://example.com/"
 ```
 
 This command downloads the latest Wayback snapshot of `example.com` into the `site/` directory. BFS discovery downloads pages on the same origin up to `--max-pages 200`; repeatable blog/category/tag route templates keep one representative page by default.
@@ -87,23 +94,23 @@ This command downloads the latest Wayback snapshot of `example.com` into the `si
 
 ```bash
 # Snapshot within a specific date range
-python wayback_downloader.py \
+python -m wayback_tool \
     --url "https://example.com/about" \
     --out ./my-site \
     --from 20200101 --to 20231231
 
 # Slower and safer / faster with a greater risk of HTTP 429 responses
-python wayback_downloader.py --url "https://example.com" --workers 4
-python wayback_downloader.py --url "https://example.com" --workers 16
+python -m wayback_tool --url "https://example.com" --workers 4
+python -m wayback_tool --url "https://example.com" --workers 16
 
 # Multi-page site
-python wayback_downloader.py --url "https://docs.python.org" --max-pages 500
+python -m wayback_tool --url "https://docs.python.org" --max-pages 500
 
 # Keep up to three examples of each repeatable content template
-python wayback_downloader.py --url "https://example.com" --max-per-template 3
+python -m wayback_tool --url "https://example.com" --max-per-template 3
 
 # Disable template grouping and download every discovered page
-python wayback_downloader.py --url "https://example.com" --max-per-template 0
+python -m wayback_tool --url "https://example.com" --max-per-template 0
 ```
 
 ## Output structure
@@ -134,8 +141,8 @@ Open `site/example.com/index.html` in a browser. It works offline.
 ## How it works
 
 1. **CDX query** — Retrieves every snapshot timestamp for the requested URL from the Wayback CDX API.
-2. **Per-page capture** — For each BFS result, downloads the HTML once, immediately scans `<img>`, `<link>`, `<script>`, `<source>`, `srcset`, and inline styles, then downloads that page's complete asset tree before moving to the next page.
-3. **Recursive asset processing** — Downloads CSS, JavaScript, images, and fonts. Relative CSS `@import` and `url()` references are resolved against the stylesheet URL; best-effort JavaScript references such as `fetch()` are resolved against the script URL. Shared assets are downloaded only once across the site.
+2. **Critical page capture** — For each BFS result, downloads the HTML together with its stylesheets, recursive CSS `@import` files, and external JavaScript. It then rewrites and saves the page once before BFS continues.
+3. **Deferred heavy assets** — Images, fonts, video/audio, embeds, CSS `url()` resources, and best-effort JavaScript resources such as `fetch()` targets are registered with their final local paths immediately but downloaded after page discovery. Saved HTML/CSS/JS files are not reopened.
 4. **Concurrent-safe downloads** — Uses `aiohttp` with rate limiting. HTTP 429 responses trigger exponential backoff at 2, 4, 8, 16, and 32 seconds. Snapshot 404 responses trigger three timestamp fallback windows: ±12 hours, ±48 hours, and ±168 hours.
 5. **HTML rewriting** — Uses BeautifulSoup to process every `<a href>`, `<link href>`, `<script src>`, `<img src>`, `<source src>`, `<iframe src>`, and `srcset` attribute:
    - Removes the Wayback prefix (`/web/{ts}id_/`) from URLs.
@@ -143,8 +150,7 @@ Open `site/example.com/index.html` in a browser. It works offline.
    - Queues internal URLs that have not been downloaded yet and leaves placeholders for a later pass.
    - Keeps external URLs unchanged; they will not work offline.
 6. **Wayback toolbar cleanup** — Removes `#wm-ipp-base`, `wombat.js`, `bundle-playback.js`, `banner-styles.css`, RufflePlayer scripts, and toolbar iframes.
-7. **Final local link pass** — After discovery, rewrites links to pages found later. This pass uses retained HTML and performs no network or asset downloads.
-8. **Sitemap generation** — Writes `sitemap.json` with page metadata and `sitemap.txt` with a list of paths.
+7. **Sitemap generation** — Writes `sitemap.json` with page metadata and `sitemap.txt` with a list of paths after the deferred asset queue finishes.
 
 ## Limitations
 
@@ -164,16 +170,25 @@ Open `site/example.com/index.html` in a browser. It works offline.
 
 ```text
 wayback-tool/
-├── wayback_downloader.py    # CLI and orchestration
-├── lib/
-│   ├── cdx.py               # CDX API client
-│   ├── fetcher.py           # Concurrent downloads, retries, and fallback
-│   ├── cleaner.py           # Wayback toolbar artifact cleanup
-│   ├── css_processor.py     # CSS @import and url() extraction and rewriting
-│   ├── path_mapper.py       # URL-to-local-path mapping with Unicode support
-│   ├── rewriter.py          # HTML attributes, inline CSS, and best-effort JS
-│   └── sitemap.py           # BFS discovery and sitemap files
-├── requirements.txt
+├── pyproject.toml           # Package metadata, dependencies, and CLI entry
+├── src/
+│   └── wayback_tool/
+│       ├── __main__.py      # python -m wayback_tool
+│       ├── cli.py           # Argument parsing and console entry
+│       ├── config.py        # Typed runtime configuration
+│       ├── pipeline.py      # Download orchestration
+│       ├── cdx.py           # CDX API client
+│       ├── fetcher.py       # Downloads, retries, and fallback
+│       ├── cleaner.py       # Wayback artifact cleanup
+│       ├── css_processor.py # CSS dependency extraction and rewriting
+│       ├── path_mapper.py   # URL-to-local-path mapping
+│       ├── rewriter.py      # HTML and inline resource rewriting
+│       └── sitemap.py       # BFS discovery and sitemap generation
+├── tests/                   # Network-free unit tests
+├── wayback_downloader.py    # Backward-compatible source wrapper
+├── Dockerfile
+├── compose.yaml
+├── LICENSE
 └── README.md
 ```
 

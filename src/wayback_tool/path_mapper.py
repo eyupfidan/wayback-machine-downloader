@@ -1,4 +1,4 @@
-"""URL-to-local-path conversion.
+"""URL-to-local-path conversion utilities.
 
 Convert original URLs downloaded from Wayback into filesystem-safe paths.
 All file operations use pathlib so Unicode characters work correctly on
@@ -51,6 +51,20 @@ def strip_wayback_prefix(url: str) -> str:
     if m2:
         return m2.group(1)
     return url
+
+
+def extract_wayback_timestamp(url: str) -> str | None:
+    """Extract the timestamp from a Wayback URL, when one is present."""
+    if not url:
+        return None
+    match = WAYBACK_PREFIX_RE.match(url)
+    if match:
+        return match.group(1)
+    match = re.match(
+        r"^(?:https?:)?//web\.archive\.org/web/(\d+)/(.*)$",
+        url,
+    )
+    return match.group(1) if match else None
 
 
 def is_non_downloadable(url: str) -> bool:

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wayback-tool"
+version = "1.0.0"
+description = "Convert Wayback Machine snapshots into offline static sites"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "wayback-tool contributors" }]
+dependencies = [
+    "aiohttp>=3.9,<4",
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+wayback-tool = "wayback_tool.cli:run"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

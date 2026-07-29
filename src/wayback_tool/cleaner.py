@@ -1,4 +1,4 @@
-"""Wayback toolbar and artifact cleaner.
+"""Wayback toolbar and injected-artifact cleaner.
 
 Wayback injects toolbar scripts, stylesheets, and images into archived HTML.
 They are unnecessary in an offline copy and can break URLs by redirecting them
