@@ -1,44 +1,107 @@
-# wayback-tool — Wayback to Static Site Converter
+<div align="center">
 
-Give the tool a Wayback Machine URL and it creates a **fully static, offline-ready copy** of the site. It downloads HTML, CSS, JavaScript, images, and fonts, then rewrites all links to local paths.
+# Wayback Machine Downloader
 
-When you open `index.html` in a browser, the copy looks **identical to the original site** without an internet connection. The page HTML comes directly from a Wayback snapshot, so no JavaScript rendering is required.
+**Turn archived websites into clean, browsable static copies.**
 
-## Installation
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/version-1.0.0-2ea44f)](https://github.com/eyupfidan/wayback-machine-downloader)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](Dockerfile)
+[![GitHub stars](https://img.shields.io/github/stars/eyupfidan/wayback-machine-downloader?style=flat&logo=github)](https://github.com/eyupfidan/wayback-machine-downloader/stargazers)
+
+[Features](#features) · [Quick start](#quick-start) · [Docker](#docker) · [CLI options](#cli-options) · [Limitations](#limitations)
+
+</div>
+
+Wayback Machine Downloader is a Python CLI that downloads archived HTML, CSS, JavaScript, images, and fonts, then rewrites their links for local use. The result is a portable static site that can be opened without an internet connection.
+
+> [!NOTE]
+> This project works best with static and server-rendered websites. Applications that depend on client-side rendering may require a headless browser.
+
+## Features
+
+- Accepts original URLs and Wayback Machine snapshot URLs
+- Downloads pages and assets concurrently with automatic rate-limit backoff
+- Rewrites HTML, CSS, `srcset`, and common JavaScript resource URLs
+- Removes Wayback toolbar and playback artifacts
+- Discovers same-origin pages with configurable limits
+- Falls back to nearby snapshots when an archived resource is missing
+- Generates `sitemap.json` and `sitemap.txt`
+- Runs locally or in Docker
+
+```mermaid
+flowchart LR
+    A[Website URL] --> B[Find Wayback snapshot]
+    B --> C[Download pages and assets]
+    C --> D[Clean and rewrite links]
+    D --> E[Offline static site]
+```
+
+## Quick start
+
+Requires Python 3.10 or later.
 
 ```bash
-# Requires Python 3.10+
+git clone https://github.com/eyupfidan/wayback-machine-downloader.git
+cd wayback-machine-downloader
 pip install .
 ```
 
-For an editable development install with tests:
+Download the latest available snapshot:
 
 ```bash
-pip install -e ".[dev]"
-pytest
+wayback-tool --url "https://example.com"
 ```
 
-The project has three runtime dependencies: `aiohttp` for concurrent HTTP requests and `beautifulsoup4` with `lxml` for HTML parsing.
+The site is saved to `./site` by default. Open `site/example.com/index.html` in your browser.
+
+You can also run the package as a module:
+
+```bash
+python -m wayback_tool --url "https://example.com"
+```
+
+## Examples
+
+Download a specific archived snapshot:
+
+```bash
+wayback-tool \
+  --url "https://web.archive.org/web/20210101/https://example.com/"
+```
+
+Limit snapshots to a date range:
+
+```bash
+wayback-tool \
+  --url "https://example.com" \
+  --from 20200101 \
+  --to 20231231
+```
+
+Download a larger site to a custom directory:
+
+```bash
+wayback-tool \
+  --url "https://example.com" \
+  --out ./archive \
+  --workers 8 \
+  --max-pages 500
+```
 
 ## Docker
 
-Build the image:
+Build and run the image:
 
 ```bash
 docker build -t wayback-tool .
-```
-
-Run it on Linux/macOS and save the result under the local `site/` directory:
-
-```bash
 mkdir -p site
 docker run --rm \
-    -v "$(pwd)/site:/output" \
-    wayback-tool \
-    --url "https://example.com" \
-    --out /output \
-    --workers 4 \
-    --max-pages 200
+  -v "$(pwd)/site:/output" \
+  wayback-tool \
+  --url "https://example.com" \
+  --out /output
 ```
 
 PowerShell:
@@ -46,161 +109,76 @@ PowerShell:
 ```powershell
 New-Item -ItemType Directory -Force site | Out-Null
 docker run --rm `
-    -v "${PWD}/site:/output" `
-    wayback-tool `
-    --url "https://example.com" `
-    --out /output `
-    --workers 4 `
-    --max-pages 200
+  -v "${PWD}/site:/output" `
+  wayback-tool `
+  --url "https://example.com" `
+  --out /output
 ```
 
-Docker Compose builds the same image and mounts `./site` automatically:
+Or use Docker Compose:
 
 ```bash
-docker compose build
 docker compose run --rm wayback \
-    --url "https://example.com" \
-    --out /output \
-    --workers 4 \
-    --max-pages 200
+  --url "https://example.com" \
+  --out /output
 ```
 
-The container runs as a non-root user. On Linux systems whose local user is not
-UID/GID `1000`, add `--user "$(id -u):$(id -g)"` to `docker run`, or run Compose
-with `docker compose run --rm --user "$(id -u):$(id -g)" wayback ...`.
+## CLI options
 
-## Usage
-
-```bash
-python -m wayback_tool --url "https://example.com/"
-```
-
-This command downloads the latest Wayback snapshot of `example.com` into the `site/` directory. BFS discovery downloads pages on the same origin up to `--max-pages 200`; repeatable blog/category/tag route templates keep one representative page by default.
-
-### Options
-
-| Flag | Default | Description |
-|---|---|---|
-| `--url` | required | Target URL. Supports both `https://example.com/` and `https://web.archive.org/web/20210101/https://example.com/` |
+| Option | Default | Description |
+| --- | --- | --- |
+| `--url` | required | Original website or Wayback snapshot URL |
 | `--out` | `./site` | Output directory |
-| `--workers` | `8` | Number of concurrent downloads. A value between 4 and 16 is recommended to avoid Wayback rate limits |
-| `--max-pages` | `200` | Maximum number of pages to download during BFS discovery |
-| `--max-per-template` | `1` | Maximum pages kept for repeatable blog, post, category, and tag URL patterns. Use `0` to download all matching pages |
-| `--from` | none | Start date in `YYYYMMDD` format, for example `20200101` |
-| `--to` | none | End date in `YYYYMMDD` format |
-| `--verbose`, `-v` | false | Enable debug logging |
+| `--workers` | `8` | Number of concurrent downloads |
+| `--max-pages` | `200` | Maximum number of discovered pages |
+| `--max-per-template` | `1` | Pages kept per repeatable route; `0` disables grouping |
+| `--from` | — | Earliest snapshot date in `YYYYMMDD` format |
+| `--to` | — | Latest snapshot date in `YYYYMMDD` format |
+| `--verbose`, `-v` | off | Enable debug logging |
 
-### Examples
+For the complete command reference:
 
 ```bash
-# Snapshot within a specific date range
-python -m wayback_tool \
-    --url "https://example.com/about" \
-    --out ./my-site \
-    --from 20200101 --to 20231231
-
-# Slower and safer / faster with a greater risk of HTTP 429 responses
-python -m wayback_tool --url "https://example.com" --workers 4
-python -m wayback_tool --url "https://example.com" --workers 16
-
-# Multi-page site
-python -m wayback_tool --url "https://docs.python.org" --max-pages 500
-
-# Keep up to three examples of each repeatable content template
-python -m wayback_tool --url "https://example.com" --max-per-template 3
-
-# Disable template grouping and download every discovered page
-python -m wayback_tool --url "https://example.com" --max-per-template 0
+wayback-tool --help
 ```
 
-## Output structure
+## Output
 
 ```text
 site/
-├── sitemap.json              # Metadata for every page
-├── sitemap.txt               # Paths only
+├── sitemap.json
+├── sitemap.txt
 └── example.com/
-    ├── index.html            # Rewritten with relative links
+    ├── index.html
     ├── about/
-    │   ├── index.html
-    │   └── team/
-    │       └── index.html
+    │   └── index.html
     └── assets/
         ├── css/
-        │   ├── main.css      # Rewritten url() and @import references
-        │   └── theme.css
         ├── js/
-        │   └── bundle.js     # Downloaded with best-effort URL rewriting
         └── img/
-            ├── logo.png
-            └── hero.webp
 ```
-
-Open `site/example.com/index.html` in a browser. It works offline.
-
-## How it works
-
-1. **CDX query** — Retrieves every snapshot timestamp for the requested URL from the Wayback CDX API.
-2. **Critical page capture** — For each BFS result, downloads the HTML together with its stylesheets, recursive CSS `@import` files, and external JavaScript. It then rewrites and saves the page once before BFS continues.
-3. **Deferred heavy assets** — Images, fonts, video/audio, embeds, CSS `url()` resources, and best-effort JavaScript resources such as `fetch()` targets are registered with their final local paths immediately but downloaded after page discovery. Saved HTML/CSS/JS files are not reopened.
-4. **Concurrent-safe downloads** — Uses `aiohttp` with rate limiting. HTTP 429 responses trigger exponential backoff at 2, 4, 8, 16, and 32 seconds. Snapshot 404 responses trigger three timestamp fallback windows: ±12 hours, ±48 hours, and ±168 hours.
-5. **HTML rewriting** — Uses BeautifulSoup to process every `<a href>`, `<link href>`, `<script src>`, `<img src>`, `<source src>`, `<iframe src>`, and `srcset` attribute:
-   - Removes the Wayback prefix (`/web/{ts}id_/`) from URLs.
-   - Converts URLs found in `asset_map` to relative local paths.
-   - Queues internal URLs that have not been downloaded yet and leaves placeholders for a later pass.
-   - Keeps external URLs unchanged; they will not work offline.
-6. **Wayback toolbar cleanup** — Removes `#wm-ipp-base`, `wombat.js`, `bundle-playback.js`, `banner-styles.css`, RufflePlayer scripts, and toolbar iframes.
-7. **Sitemap generation** — Writes `sitemap.json` with page metadata and `sitemap.txt` with a list of paths after the deferred asset queue finishes.
 
 ## Limitations
 
-| Limitation | Impact | Workaround |
-|---|---|---|
-| **SPAs that require JavaScript rendering (React/Vue)** | The tool downloads the snapshot's **HTML**. Content loaded dynamically through React, Vue, or AJAX remains empty | A headless browser is required; this tool is intended for static sites |
-| **Wayback rate limits (HTTP 429)** | Downloads pause when requests are sent too quickly | Reduce `--workers` to 4–8; the tool applies backoff automatically |
-| **CDX query authorization** | Wildcard searches such as `*.domain.com` may return HTTP 403 for large sites | The tool uses `matchType=exact` and discovers unknown pages through BFS |
-| **Very large sites (more than 5,000 pages)** | The output can become large and downloads may take hours | Adjust the `--max-pages` limit |
-| **JavaScript bundles** | URL detection in bundled JavaScript is best-effort, not exhaustive | This is sufficient for many static sites; SPAs are not supported |
-| **Iframes** | The original source of deeply nested iframes may be missed | The tool downloads iframe sources, but recursion is not unlimited |
-| **Corrupt fonts** | Wayback occasionally returns an HTML 404 page for `.woff` URLs | The tool detects this and removes the affected `@font-face` rule |
-| **Unicode file names** | NTFS imposes file-name restrictions | `safe_filename` removes unsupported characters and generates a short name with a hash |
-| **External URLs** | Links to other domains do not work offline | This is intentional: external URLs remain unchanged |
+- React, Vue, and other client-rendered applications are not fully supported.
+- External links remain online URLs and are not downloaded.
+- JavaScript URL rewriting is best-effort.
+- Large archives may trigger Wayback Machine rate limits; reduce `--workers` if needed.
+- Some resources may be unavailable or corrupt in the original archive.
 
-## Source layout
+Please use the service responsibly and respect the [Internet Archive Terms of Use](https://archive.org/about/terms.php).
 
-```text
-wayback-tool/
-├── pyproject.toml           # Package metadata, dependencies, and CLI entry
-├── src/
-│   └── wayback_tool/
-│       ├── __main__.py      # python -m wayback_tool
-│       ├── cli.py           # Argument parsing and console entry
-│       ├── config.py        # Typed runtime configuration
-│       ├── pipeline.py      # Download orchestration
-│       ├── cdx.py           # CDX API client
-│       ├── fetcher.py       # Downloads, retries, and fallback
-│       ├── cleaner.py       # Wayback artifact cleanup
-│       ├── css_processor.py # CSS dependency extraction and rewriting
-│       ├── path_mapper.py   # URL-to-local-path mapping
-│       ├── rewriter.py      # HTML and inline resource rewriting
-│       └── sitemap.py       # BFS discovery and sitemap generation
-├── tests/                   # Network-free unit tests
-├── wayback_downloader.py    # Backward-compatible source wrapper
-├── Dockerfile
-├── compose.yaml
-├── LICENSE
-└── README.md
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
 ```
 
-## References
+## Acknowledgements
 
-Inspired by:
-
-- [heikkitoivonen/wayback_downloader](https://github.com/heikkitoivonen/wayback_downloader) — Python, Requests, BeautifulSoup, and recursive crawling
-- [GeiserX/Wayback-Archive](https://github.com/GeiserX/Wayback-Archive) — aggressive artifact cleanup, corrupt-font detection, and three-tier timestamp fallback
-- [Internet Archive — Wayback CDX Server API](https://github.com/internetarchive/wayback/blob/master/wayback-cdx-server/README.md) — CDX filters and `matchType`
+Inspired by [heikkitoivonen/wayback_downloader](https://github.com/heikkitoivonen/wayback_downloader) and [GeiserX/Wayback-Archive](https://github.com/GeiserX/Wayback-Archive). Snapshot discovery uses the [Wayback CDX Server API](https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server).
 
 ## License
 
-MIT.
-#
+Distributed under the [MIT License](LICENSE).
