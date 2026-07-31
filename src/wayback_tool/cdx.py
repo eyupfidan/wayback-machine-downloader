@@ -28,6 +28,7 @@ async def fetch_snapshots(
     limit: int = 200,
     html_only: bool = True,
     session: aiohttp.ClientSession | None = None,
+    proxy: str | None = None,
 ) -> list[tuple[str, str]]:
     """Fetch a list of Wayback snapshots for a URL.
 
@@ -42,6 +43,7 @@ async def fetch_snapshots(
         html_only: Restrict results to HTML pages. Disable this for CSS,
             JavaScript, images, fonts, and other assets.
         session: Reusable aiohttp session.
+        proxy: Explicit proxy URL to use for this request.
 
     Returns:
         Ordered list of [(timestamp, original_url), ...] tuples.
@@ -70,7 +72,11 @@ async def fetch_snapshots(
 
     try:
         # Preserve repeated filter parameters instead of flattening the dict.
-        async with session.get(CDX_URL, params=_build_params(params)) as resp:
+        async with session.get(
+            CDX_URL,
+            params=_build_params(params),
+            proxy=proxy,
+        ) as resp:
             if resp.status == 403:
                 raise PermissionError(
                     f"CDX query rejected (403): {url!r} — this is probably "
@@ -118,6 +124,7 @@ async def fetch_all_unique_pages(
     from_ts: str | None = None,
     to_ts: str | None = None,
     limit_per_query: int = 50,
+    proxy: str | None = None,
 ) -> list[str]:
     """Fetch unique pages across all snapshots of one seed URL.
 
@@ -130,6 +137,7 @@ async def fetch_all_unique_pages(
         to_ts=to_ts,
         match_type="exact",
         limit=limit_per_query,
+        proxy=proxy,
     )
     seen = set()
     for _ts, orig in snaps:
