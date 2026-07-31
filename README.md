@@ -49,18 +49,18 @@ cd wayback-machine-downloader
 pip install .
 ```
 
-Download the latest available snapshot:
+Download an archived snapshot:
 
 ```bash
-wayback-tool --url "https://example.com"
+wayback-tool --url "https://web.archive.org/web/20210101000000/https://www.python.org/"
 ```
 
-The site is saved to `./site` by default. Open `site/example.com/index.html` in your browser.
+The site is saved to `./site` by default. Open `site/www.python.org/index.html` in your browser.
 
 You can also run the package as a module:
 
 ```bash
-python -m wayback_tool --url "https://example.com"
+python -m wayback_tool --url "https://web.archive.org/web/20210101000000/https://www.python.org/"
 ```
 
 ## Examples
@@ -69,14 +69,14 @@ Download a specific archived snapshot:
 
 ```bash
 wayback-tool \
-  --url "https://web.archive.org/web/20210101/https://example.com/"
+  --url "https://web.archive.org/web/20210101000000/https://www.python.org/"
 ```
 
 Limit snapshots to a date range:
 
 ```bash
 wayback-tool \
-  --url "https://example.com" \
+  --url "https://web.archive.org/web/20210101000000/https://www.python.org/" \
   --from 20200101 \
   --to 20231231
 ```
@@ -85,7 +85,7 @@ Download a larger site to a custom directory:
 
 ```bash
 wayback-tool \
-  --url "https://example.com" \
+  --url "https://web.archive.org/web/20210101000000/https://www.python.org/" \
   --out ./archive \
   --workers 8 \
   --max-pages 500
@@ -95,7 +95,7 @@ Use an HTTP/HTTPS proxy (credentials are hidden in console output):
 
 ```bash
 wayback-tool \
-  --url "https://example.com" \
+  --url "https://web.archive.org/web/20210101000000/https://www.python.org/" \
   --proxy "http://username:password@127.0.0.1:8080"
 ```
 
@@ -113,7 +113,7 @@ mkdir -p site
 docker run --rm \
   -v "$(pwd)/site:/output" \
   wayback-tool \
-  --url "https://example.com" \
+  --url "https://web.archive.org/web/20210101000000/https://www.python.org/" \
   --out /output
 ```
 
@@ -124,7 +124,7 @@ New-Item -ItemType Directory -Force site | Out-Null
 docker run --rm `
   -v "${PWD}/site:/output" `
   wayback-tool `
-  --url "https://example.com" `
+  --url "https://web.archive.org/web/20210101000000/https://www.python.org/" `
   --out /output
 ```
 
@@ -132,7 +132,7 @@ Or use Docker Compose:
 
 ```bash
 docker compose run --rm wayback \
-  --url "https://example.com" \
+  --url "https://web.archive.org/web/20210101000000/https://www.python.org/" \
   --out /output
 ```
 
@@ -162,7 +162,7 @@ wayback-tool --help
 site/
 ├── sitemap.json
 ├── sitemap.txt
-└── example.com/
+└── www.python.org/
     ├── index.html
     ├── about/
     │   └── index.html
