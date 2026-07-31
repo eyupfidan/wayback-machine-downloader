@@ -22,6 +22,7 @@ Examples:
   wayback-tool --url "https://web.archive.org/web/20210101/https://example.com/"
   wayback-tool --url "https://example.com/about" --out ./my-site --workers 16
   wayback-tool --url "https://example.com" --max-pages 1000
+  wayback-tool --url "https://example.com" --proxy "http://127.0.0.1:8080"
 """,
     )
     parser.add_argument("--url", required=True, help="Wayback or origin URL to download")
@@ -36,6 +37,13 @@ Examples:
     )
     parser.add_argument("--from", dest="from_ts", help="Start date (YYYYMMDD)")
     parser.add_argument("--to", dest="to_ts", help="End date (YYYYMMDD)")
+    parser.add_argument(
+        "--proxy",
+        help=(
+            "HTTP/HTTPS proxy URL. The proxy is checked before use and the "
+            "downloader falls back to a direct connection if it is unavailable"
+        ),
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
     return parser
 

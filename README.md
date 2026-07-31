@@ -23,6 +23,7 @@ Wayback Machine Downloader is a Python CLI that downloads archived HTML, CSS, Ja
 
 - Accepts original URLs and Wayback Machine snapshot URLs
 - Downloads pages and assets concurrently with automatic rate-limit backoff
+- Supports an optional, pre-checked HTTP/HTTPS proxy with automatic direct fallback
 - Rewrites HTML, CSS, `srcset`, and common JavaScript resource URLs
 - Removes Wayback toolbar and playback artifacts
 - Discovers same-origin pages with configurable limits
@@ -90,6 +91,18 @@ wayback-tool \
   --max-pages 500
 ```
 
+Use an HTTP/HTTPS proxy (credentials are hidden in console output):
+
+```bash
+wayback-tool \
+  --url "https://example.com" \
+  --proxy "http://username:password@127.0.0.1:8080"
+```
+
+The downloader checks the proxy before the crawl starts. If the check fails,
+it clearly reports the failure and continues without the proxy. When `--proxy`
+is omitted, all requests are made directly.
+
 ## Docker
 
 Build and run the image:
@@ -134,6 +147,7 @@ docker compose run --rm wayback \
 | `--max-per-template` | `1` | Pages kept per repeatable route; `0` disables grouping |
 | `--from` | — | Earliest snapshot date in `YYYYMMDD` format |
 | `--to` | — | Latest snapshot date in `YYYYMMDD` format |
+| `--proxy` | — | HTTP/HTTPS proxy URL; checked before use with direct fallback |
 | `--verbose`, `-v` | off | Enable debug logging |
 
 For the complete command reference:

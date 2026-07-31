@@ -16,4 +16,5 @@ class DownloadOptions:
     max_per_template: int = 1
     from_ts: str | None = None
     to_ts: str | None = None
+    proxy: str | None = None
     verbose: bool = False

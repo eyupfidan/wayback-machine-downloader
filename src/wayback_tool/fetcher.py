@@ -12,6 +12,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 
@@ -20,6 +21,7 @@ from .cdx import fetch_snapshots, raw_snapshot_url
 log = logging.getLogger(__name__)
 
 USER_AGENT = "WaybackDownloader/1.0 (+https://github.com/local/wayback-tool)"
+PROXY_CHECK_URL = "https://web.archive.org/robots.txt"
 
 # File types that Wayback should return as binary data.
 BINARY_EXTENSIONS = (
@@ -54,6 +56,8 @@ class WaybackFetcher:
     workers: int = 8
     timeout_seconds: int = 45
     max_retries: int = 4
+    proxy: str | None = None
+    proxy_check_timeout_seconds: int = 10
 
     _sem: asyncio.Semaphore = field(init=False)
     _session: Optional[aiohttp.ClientSession] = field(default=None, init=False)
@@ -61,6 +65,7 @@ class WaybackFetcher:
     _min_interval: float = 0.25
     _last_request_time: float = 0.0
     _lock: asyncio.Lock = field(init=False)
+    _active_proxy: str | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         self._sem = asyncio.Semaphore(self.workers)
@@ -74,11 +79,17 @@ class WaybackFetcher:
             headers={"User-Agent": USER_AGENT},
             connector=aiohttp.TCPConnector(limit=self.workers * 2),
         )
+        await self._configure_proxy()
         return self
 
     async def __aexit__(self, *exc) -> None:
         if self._session:
             await self._session.close()
+
+    @property
+    def active_proxy(self) -> str | None:
+        """The verified proxy in use, or ``None`` for direct requests."""
+        return self._active_proxy
 
     async def _rate_limit(self) -> None:
         """Apply the global minimum interval between requests."""
@@ -89,6 +100,47 @@ class WaybackFetcher:
                 await asyncio.sleep(wait)
             self._last_request_time = asyncio.get_event_loop().time()
 
+    async def _configure_proxy(self) -> None:
+        """Check the configured proxy once, falling back to direct requests."""
+        if not self.proxy:
+            log.info("Proxy: not configured; using a direct connection.")
+            return
+
+        display_url = _redact_proxy_url(self.proxy)
+        if not _is_supported_proxy_url(self.proxy):
+            log.warning(
+                "Proxy: invalid or unsupported URL (%s); falling back to a direct connection.",
+                display_url,
+            )
+            return
+
+        log.info("Proxy: checking connectivity before use (%s)...", display_url)
+        assert self._session is not None
+        try:
+            timeout = aiohttp.ClientTimeout(total=self.proxy_check_timeout_seconds)
+            async with self._session.get(
+                PROXY_CHECK_URL,
+                proxy=self.proxy,
+                timeout=timeout,
+                allow_redirects=True,
+            ) as response:
+                if 200 <= response.status < 400:
+                    self._active_proxy = self.proxy
+                    log.info(
+                        "Proxy: check succeeded; requests will use %s.",
+                        display_url,
+                    )
+                    return
+                log.warning(
+                    "Proxy: check returned HTTP %d; falling back to a direct connection.",
+                    response.status,
+                )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+            log.warning(
+                "Proxy: check failed (%s); falling back to a direct connection.",
+                type(error).__name__,
+            )
+
     async def _fetch_with_retry(self, url: str) -> FetchResult:
         """Download one URL with retries and exponential backoff."""
         last_error = None
@@ -96,7 +148,11 @@ class WaybackFetcher:
             await self._rate_limit()
             assert self._session is not None
             try:
-                async with self._session.get(url, allow_redirects=True) as resp:
+                async with self._session.get(
+                    url,
+                    allow_redirects=True,
+                    proxy=self._active_proxy,
+                ) as resp:
                     if resp.status == 429:
                         backoff = min(2 ** attempt, 30)
                         log.warning(
@@ -175,6 +231,7 @@ class WaybackFetcher:
                 original_url,
                 html_only=False,
                 session=self._session,
+                proxy=self._active_proxy,
             )
             # CDX returns chronological rows. Prefer recent captures and limit
             # the attempts in fetch_snapshot to the newest five.
@@ -282,3 +339,34 @@ class WaybackFetcher:
                 tss.append(t.strftime("%Y%m%d%H%M%S"))
             out.append((f"±{hours}h", tss))
         return out
+
+
+def _is_supported_proxy_url(proxy_url: str) -> bool:
+    """Return whether aiohttp can use the supplied explicit proxy URL."""
+    try:
+        parsed = urlsplit(proxy_url)
+        # Accessing port also validates that it is numeric and in range.
+        parsed.port
+    except ValueError:
+        return False
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.hostname)
+
+
+def _redact_proxy_url(proxy_url: str) -> str:
+    """Hide proxy credentials before writing its URL to the console."""
+    try:
+        parsed = urlsplit(proxy_url)
+    except ValueError:
+        return "<invalid proxy URL>"
+    if parsed.username is None:
+        return proxy_url
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        return f"{parsed.scheme}://***:***@<invalid proxy address>"
+    if port is not None:
+        host = f"{host}:{port}"
+    return urlunsplit((parsed.scheme, f"***:***@{host}", parsed.path, parsed.query, parsed.fragment))

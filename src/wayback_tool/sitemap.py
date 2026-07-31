@@ -229,7 +229,11 @@ async def discover_pages_bfs(
             ts, original = preferred_timestamp, url
         else:
             try:
-                snaps = await fetch_snapshots(url, session=fetcher._session)
+                snaps = await fetch_snapshots(
+                    url,
+                    session=fetcher._session,
+                    proxy=fetcher.active_proxy,
+                )
             except Exception as e:
                 log.warning("CDX error for %s: %s", url, e)
                 skipped.append(SkippedPage(url, f"CDX error: {e}"))

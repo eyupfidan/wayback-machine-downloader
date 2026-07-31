@@ -89,7 +89,10 @@ class Pipeline:
         logging.info("Origin host: %s", self.origin_host)
         logging.info("Output: %s", self.output_dir)
 
-        async with WaybackFetcher(workers=self.args.workers) as fetcher:
+        async with WaybackFetcher(
+            workers=self.args.workers,
+            proxy=self.args.proxy,
+        ) as fetcher:
             # 1) Page discovery
             logging.info("=== Stage 1: Page discovery (BFS, max=%d) ===", self.args.max_pages)
             bfs_result = await discover_pages_bfs(
@@ -422,5 +425,4 @@ def _relative_posix(from_path: Path, to_path: Path) -> str:
     down = tp[common:]
     rel = "/".join(up + down)
     return rel or "."
-
 
